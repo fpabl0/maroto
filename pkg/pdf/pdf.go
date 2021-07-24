@@ -16,7 +16,8 @@ import (
 type Maroto interface {
 	// Grid System
 	Row(height float64, closure func())
-	Col(width uint, closure func())
+	ColPercent(widthPercent float64, closure func())
+	Col(widthFactor uint, closure func())
 	ColSpace(gridSize uint)
 
 	// Registers
@@ -91,7 +92,6 @@ type PdfMaroto struct {
 	headerFooterContextActive bool
 
 	// Page configs
-	marginTop         float64
 	calculationMode   bool
 	backgroundColor   color.Color
 	debugMode         bool
@@ -211,19 +211,13 @@ func (s *PdfMaroto) GetCurrentOffset() float64 {
 // SetPageMargins overrides default margins (10,10,10)
 // the new page margin will affect all PDF pages
 func (s *PdfMaroto) SetPageMargins(left, top, right float64) {
-	if top > 10 {
-		s.marginTop = top - 10
-	}
-
-	s.Pdf.SetMargins(left, 10.0, right)
+	s.Pdf.SetMargins(left, top, right)
 }
 
 // GetPageMargins returns the set page margins. Comes in order of Left, Top, Right, Bottom
 // Default page margins is left: 10, top: 10, right: 10
 func (s *PdfMaroto) GetPageMargins() (left float64, top float64, right float64, bottom float64) {
 	left, top, right, bottom = s.Pdf.GetMargins()
-	top += s.marginTop
-
 	return
 }
 
@@ -370,16 +364,35 @@ func (s *PdfMaroto) Row(height float64, closure func()) {
 // Col create a column inside a row and enable to add
 // components inside. Maroto do not support recursive
 // columns or rows inside columns.
-func (s *PdfMaroto) Col(width uint, closure func()) {
-	if width == 0 {
-		width = 12
+func (s *PdfMaroto) Col(widthFactor uint, closure func()) {
+	if widthFactor == 0 {
+		widthFactor = 12
 	}
 
-	percent := float64(width) / float64(12)
+	percent := float64(widthFactor) / float64(12)
 
 	pageWidth, _ := s.Pdf.GetPageSize()
 	left, _, right, _ := s.Pdf.GetMargins()
 	widthPerCol := (pageWidth - right - left) * percent
+
+	s.colWidth = widthPerCol
+	s.createColSpace(widthPerCol)
+
+	// This closure has the components to be executed
+	closure()
+
+	s.xColOffset += s.colWidth
+}
+
+// ColPercent create a column using the raw percents against the page width.
+func (s *PdfMaroto) ColPercent(widthPercent float64, closure func()) {
+	if widthPercent == 0 {
+		widthPercent = 1
+	}
+
+	pageWidth, _ := s.Pdf.GetPageSize()
+	left, _, right, _ := s.Pdf.GetMargins()
+	widthPerCol := (pageWidth - right - left) * widthPercent
 
 	s.colWidth = widthPerCol
 	s.createColSpace(widthPerCol)
@@ -589,6 +602,10 @@ func (s *PdfMaroto) drawLastFooter() {
 }
 
 func (s *PdfMaroto) footer() {
+	if s.footerClosure == nil {
+		return
+	}
+
 	backgroundColor := s.backgroundColor
 	s.SetBackgroundColor(color.NewWhite())
 
@@ -610,12 +627,13 @@ func (s *PdfMaroto) footer() {
 }
 
 func (s *PdfMaroto) header() {
+	// do not draw the header if it is not provided
+	if s.headerClosure == nil {
+		return
+	}
+
 	backgroundColor := s.backgroundColor
 	s.SetBackgroundColor(color.NewWhite())
-
-	s.Row(s.marginTop, func() {
-		s.ColSpace(12)
-	})
 
 	if s.headerClosure != nil {
 		s.headerClosure()
